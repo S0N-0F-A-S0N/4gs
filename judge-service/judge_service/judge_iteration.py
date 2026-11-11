@@ -103,16 +103,22 @@ async def _run_duels(
     openai = _create_openai_client()
 
     leader = progress.leader
+    leader_gens = await get_miner_generations(git_batcher.git, leader, state.current_round, ref=ref)
+
     for hotkey in remaining:
         if shutdown.should_stop:
             break
 
         prev_leader = leader
+        challenger_gens = await get_miner_generations(git_batcher.git, hotkey, state.current_round, ref=ref)
+
         leader = await _challenge_leader(
             openai=openai,
             git_batcher=git_batcher,
             leader=leader,
+            leader_gens=leader_gens,
             hotkey=hotkey,
+            challenger_gens=challenger_gens,
             state=state,
             prompts=prompts,
             win_margin=competition_config.win_margin,
@@ -121,6 +127,9 @@ async def _run_duels(
             shutdown=shutdown,
         )
         logger.info(f"{prev_leader[:10]} vs {hotkey[:10]}: {leader[:10]} wins")
+
+        if leader != prev_leader:
+            leader_gens = challenger_gens
 
         progress.leader = leader
         progress.completed_hotkeys.append(hotkey)
@@ -135,7 +144,9 @@ async def _challenge_leader(
     openai: AsyncOpenAI,
     git_batcher: GitBatcher,
     leader: str,
+    leader_gens: dict[str, GenerationResult] | None,
     hotkey: str,
+    challenger_gens: dict[str, GenerationResult] | None,
     state: CompetitionState,
     prompts: list[str],
     win_margin: float,
@@ -148,9 +159,6 @@ async def _challenge_leader(
     Loads generations for both parties, runs the match, persists the report,
     and returns the hotkey of whoever holds the leader position after the match.
     """
-    leader_gens = await get_miner_generations(git_batcher.git, leader, state.current_round, ref=ref)
-    challenger_gens = await get_miner_generations(git_batcher.git, hotkey, state.current_round, ref=ref)
-
     if challenger_gens is None:
         logger.info(f"No generations for miner {hotkey}")
         return leader
